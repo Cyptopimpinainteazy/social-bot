@@ -8,7 +8,7 @@ from pathlib import Path
 import sqlite3
 import sys
 
-from . import chaturbate, cohost, engine, twitch, youtube
+from . import bridge, chaturbate, cohost, community, creator_feed, creator_sources, engine, ops, telegram, twitch, youtube
 
 def import_events(db, lines, rules):
     added = duplicates = drafts = 0
@@ -44,7 +44,7 @@ def stream(db, args, rules):
     with closing(live):
         for event in live:
             try:
-                new, draft = engine.record(db, event, rules, origin=args.platform + "-live")
+                new, draft = engine.record(db, event, rules() if callable(rules) else rules, origin=args.platform + "-live")
             except ValueError as exc:
                 print(f"Skipped invalid platform event: {exc}", file=sys.stderr)
                 continue
@@ -68,7 +68,7 @@ def parser():
     demo = cmd.add_parser("demo", help="Load the included sample rooms")
     demo.add_argument("--dashboard", action="store_true")
     demo.add_argument("--port", type=int, default=8080)
-    dash = cmd.add_parser("dashboard", help="Open a read-only dashboard on localhost")
+    dash = cmd.add_parser("dashboard", help="Open the local creator dashboard")
     dash.add_argument("--port", type=int, default=8080)
     ingest = cmd.add_parser("import", help="Import normalized NDJSON events")
     ingest.add_argument("file", help="File path or - for stdin")
@@ -87,31 +87,67 @@ def parser():
     for action in ("approve", "dismiss", "send"):
         item = cmd.add_parser(action, help=f"{action.capitalize()} one reply draft by ID")
         item.add_argument("id", type=int)
+    edit = cmd.add_parser("edit", help="Revise a draft and return it to pending review")
+    edit.add_argument("id",type=int)
+    edit.add_argument("text")
     model = cmd.add_parser("suggest", help="Draft a reply to one unanswered chat using local Ollama")
-    model.add_argument("platform", choices=engine.PLATFORMS)
+    model.add_argument("platform", type=engine.platform_name)
     model.add_argument("--channel", required=True)
     model.add_argument("--event-id", required=True)
     model.add_argument("--model", default=os.getenv("OLLAMA_MODEL", "qwen3:8b"))
+    for view in (dash,demo):
+        view.add_argument("--controls", action="store_true", help="Enable local draft review forms")
+        view.add_argument("--edit-rules", type=Path, metavar="PATH", help="Edit a local rules file; create it if absent")
+        view.add_argument("--edit-fleet", type=Path, metavar="PATH", help="Edit an existing local fleet configuration")
+        view.add_argument("--include-db", action="append", default=[], metavar="NAME=PATH",
+                          help="Show totals from an additional account database")
+    ops.register(cmd)
+    community.register(cmd)
+    bridge.register(cmd)
+    telegram.register(cmd)
+    creator_sources.register(cmd)
+    creator_feed.register(cmd)
+    cohost.register(cmd)
     cmd.add_parser("platforms", help="Show connector coverage")
     return p
+
+def open_dashboard(args, db_path):
+    from .controls import Controls
+    from .dashboard import serve_dashboard
+    control = None
+    if args.controls or args.edit_rules or args.edit_fleet:
+        control = Controls(db_path, edit_rules=args.edit_rules, edit_fleet=args.edit_fleet, review=args.controls)
+    extra = []
+    for label in args.include_db:
+        alias, separator, path = label.partition("=")
+        if not (alias.strip() and separator and path.strip()):
+            raise ValueError("--include-db takes NAME=PATH")
+        extra.append((alias.strip(),Path(path)))
+    serve_dashboard(db_path,args.port,controls=control,extra_dbs=extra)
 
 def main(argv=None):
     args = parser().parse_args(argv)
     if args.command == "platforms":
         modes = {"twitch": "Live chat and gifts; owner replies",
                  "chaturbate": "Live public chat, joins, follows and attributed tips; draft replies",
-                 "youtube": "Live chat, Super Chats and Super Stickers; draft replies"}
+                 "youtube": "Live chat, Super Chats and Super Stickers; reviewed owner messages"}
         modes["kick"] = "Signed live webhook; ephemeral console suggestions (optional dependency)"
-        for name in engine.PLATFORMS:
-            print(f"{name:12} {modes.get(name, 'File import; draft replies')}")
+        modes.update({"fanvue":"Signed creator follower webhook; aggregate statistics",
+                      "tango":"Creator-authorized signed webhook; aggregate statistics",
+                      "tiktok":"Creator-authorized account statistics; stream events via file or creator bridge"})
+        for name in creator_feed.SOURCES:
+            modes[name] = (modes[name] + "; " if name in modes else "") + "Creator-selected SSN chat feed and history"
+        for name in sorted(engine.PLATFORMS):
+            print(f"{name:12} {modes.get(name, 'Creator-issued bridge or file import; draft replies')}")
         return 0
     db_path = args.db or Path("data/demo.sqlite3" if args.command == "demo" else "data/socialbot.sqlite3")
     try:
+        if args.command in ("fleet","fleet-status"):
+            return ops.run(args)
         if args.command == "dashboard":
-            from .dashboard import serve_dashboard
             if not db_path.is_file():
                 raise ValueError("Database not found. Start a listener or run python3 -m socialbot demo --dashboard.")
-            serve_dashboard(db_path, args.port)
+            open_dashboard(args, db_path)
             return 0
         if args.command == "kick-webhook":
             try:
@@ -120,13 +156,25 @@ def main(argv=None):
                 if exc.name and exc.name.startswith("cryptography"):
                     raise ValueError("Install the optional requirements-kick.txt dependencies first") from None
                 raise
-            listen_kick(args.channel, engine.load_rules(args.rules), port=args.port)
+            listen_kick(args.channel, engine.LiveRules(args.rules), port=args.port)
             return 0
         with closing(engine.connect(db_path)) as db:
+            if args.command == "community":
+                return community.run(args, db) or 0
+            if args.command == "bridge":
+                return bridge.run(args, db, engine.LiveRules(args.rules))
+            if args.command == "telegram-welcome":
+                return telegram.run(args, db)
+            if args.command == "cohost-worker":
+                return cohost.work(args,db)
+            if args.command in creator_feed.COMMANDS:
+                return creator_feed.run(args,db,engine.load_rules(args.rules)) or 0
+            if args.command in creator_sources.COMMANDS:
+                return creator_sources.run(args, db, engine.load_rules(args.rules)) or 0
             if args.command in ("import", "demo", "listen"):
                 rules = engine.load_rules(args.rules)
                 if args.command == "listen":
-                    stream(db, args, rules)
+                    stream(db, args, engine.LiveRules(args.rules))
                 else:
                     path = Path(__file__).with_name("demo.jsonl") if args.command == "demo" else args.file
                     source = nullcontext(sys.stdin) if path == "-" else open(path, encoding="utf-8")
@@ -149,14 +197,18 @@ def main(argv=None):
                     print(json.dumps(dict(row), ensure_ascii=False))
             elif args.command in ("approve", "dismiss"):
                 print(f"Draft {args.id}: {engine.review(db, args.id, args.command)}")
+            elif args.command == "edit":
+                engine.edit_draft(db,args.id,args.text)
+                print(f"Draft {args.id} updated and awaiting review")
             elif args.command == "send":
-                print("Twitch message ID:", engine.send(db, args.id, twitch.send_twitch_reply))
+                from .youtube_send import send_youtube_message
+                print("Platform message ID:", engine.send(db, args.id, twitch.send_twitch_reply,
+                                                        youtube_sender=send_youtube_message))
             elif args.command == "suggest":
                 print("Pending draft:", cohost.suggest(db, args.platform, args.channel,
-                                                       args.event_id, args.model))
+                                                       args.event_id, args.model, persona=engine.load_rules(args.rules)["persona"]))
         if args.command == "demo" and args.dashboard:
-            from .dashboard import serve_dashboard
-            serve_dashboard(db_path, args.port)
+            open_dashboard(args, db_path)
         return 0
     except (ValueError, RuntimeError, sqlite3.Error, OSError, http.client.HTTPException) as exc:
         print(f"Social Bot: {exc}", file=sys.stderr)

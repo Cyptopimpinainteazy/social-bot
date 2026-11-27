@@ -1,6 +1,6 @@
 # Social Bot
 
-Social Bot helps a livestream creator keep up with chat across rooms. It remembers returning viewers, drafts greetings and gift acknowledgments, and answers recurring questions using editable rules. A local dashboard shows events, viewers, drafts, and review status by platform and channel. You can run the demo with Python 3.11+ and no accounts or package installs.
+Social Bot helps a livestream creator keep up with chat across rooms. It remembers returning viewers, rotates creator-approved announcements, drafts welcome and gift messages, and answers recurring questions using editable rules. A local dashboard shows events, viewers, drafts, and review status by platform and channel. You can run the demo with Python 3.11+ and no accounts or package installs.
 
 ## Run the demo
 
@@ -19,17 +19,42 @@ python3 -m socialbot --db data/demo.sqlite3 drafts
 python3 -m socialbot --db data/demo.sqlite3 events --unanswered
 ```
 
+## Start with BIGO
+
+Try the creator-feed importer with the included synthetic Social Stream Ninja chat history. Replay the command to see duplicate messages skipped. Then open the dashboard for that same database and review the drafts.
+
+```bash
+python3 -m socialbot --db data/bigo-demo.sqlite3 creator-import bigo examples/bigo-chat-history.json --channel studio
+python3 -m socialbot --db data/bigo-demo.sqlite3 dashboard --controls --edit-rules data/creator-rules.json
+```
+
+For your own BIGO room, use a Chat History JSON export from your Social Stream Ninja installation, or run `creator-listen bigo --channel YOUR_ROOM` and configure the **creator-selected message** POST described in the guide. This gives you a scoped local review inbox. The BIGO adapter has no platform-issued send transport. [Creator feed setup](docs/creator-feed.md)
+
 ## Platform support
 
-| Platform | Event source in this version | Replies |
+| Platform | Input | Available actions |
 | --- | --- | --- |
-| Twitch | Authenticated IRC chat, Bits cheers, individual gift subscriptions | Local drafts and owner-authorized replies to live chat |
-| YouTube Live | Live Chat API text messages, Super Chats and Super Stickers | Local drafts |
-| Kick | Signed webhooks for chat, follows and gifts from a registered app | Ephemeral console suggestions |
-| Chaturbate | Broadcaster's Events API for public chat, room entry, follows and attributed tips | Local drafts |
-| BIGO LIVE, TikTok LIVE, Tango, Chamet, Passes, Whatnot, Fanvue, Stripchat | Creator-supplied events in the JSON Lines format below | Local drafts |
+| Twitch | Authenticated live chat, Bits, gift subscriptions and an optional public directory query | Reviewed replies, optional keyword auto-replies, reviewed room announcements, category/language discovery |
+| YouTube Live | Live Chat API messages, Super Chats and Super Stickers | Reviewed owner messages posted to the verified active broadcast, with returned receipt |
+| Chaturbate | Broadcaster Events API for public chat, entries, follows and attributed tips | Local reply drafts plus a separate broadcaster-installed V2 app for native entry greetings, tip acknowledgments and a room-info shortcut |
+| Kick | Signed event webhooks | Ephemeral suggestions and session counts |
+| Tango | Authorized signed live-chat and follow webhooks | Aggregate counts scoped to the configured creator |
+| Fanvue | Authorized signed follow webhook | Deduplicated creator follow-event counts |
+| TikTok | Creator-authorized account statistics and Social Stream Ninja public chat inputs | Account metrics, local public-chat drafts |
+| BIGO LIVE, Stripchat, Whatnot, CAM4, CamSoda, BongaCams, Fansly, MyFreeCams, LiveJasmin | Social Stream Ninja Chat History export or creator-selected local POST | Local public-chat drafts |
+| Telegram | A viewer starts a private conversation with the creator's bot | One welcome per opt-in and `/stop` withdrawal |
+| Other named platforms, including Chamet and Passes | Creator-supplied normalized events over JSON Lines or the signed bridge | Local drafts; custom platforms can use a `custom-NAME` label |
 
-The last row names accepted platform labels. Bringing in data from one of those services requires an export or a separately authorized event source that you convert to this format. BIGO was the original use case. A verified broadcaster chat integration is the next dependency for connecting it directly. [BIGO support and business contacts](https://www.bigo.tv/blog/bigo-live-support)
+Native connectors, creator-forwarded messages, and generic imports record distinct origins. Only native chat from a supported sending platform can authorize an external chat reply. [Platform setup and native Chaturbate app](docs/creator-sources.md) · [YouTube sending](docs/youtube-send.md)
+
+## Creator workflows
+
+| Task | Where to start |
+| --- | --- |
+| Run supervised room workers, watchdogs and Discord/Telegram operator alerts | `./deploy.sh check` then [fleet operations](docs/operations.md) |
+| Manage opt-ins, follow-back requests, follow-ups, affiliate links and quiet-room announcements | `python3 -m socialbot community --help` and [community commands](docs/community.md) |
+| Edit reply rules, compare account databases, customize gift tiers or run a local AI co-host | `python3 -m socialbot demo --dashboard --controls --edit-rules data/creator-rules.json` and [creator console](docs/creator-console.md) |
+| Connect an approved event producer or enable Telegram welcomes | [Signed bridge and viewer-initiated bot](docs/creator-console.md) |
 
 ## Run a live listener
 
@@ -129,6 +154,8 @@ python3 -m unittest discover -s tests -v
 
 Install `requirements-kick.txt` to exercise the signature tests. The suite uses synthetic data, mocked platform responses, real SQLite transactions and loopback HTTP. GitHub Actions runs the suite on Python 3.11–3.13 and smoke-tests the Docker image.
 
-## Delivery scope
+## Verification and live setup
 
-This release implements room event intake, viewer history, a local dashboard and reply handling. The project backlog includes authorized BIGO and additional creator-platform integrations, creator-approved announcement scheduling, a viewer opt-in for welcome messages and follow-up, Discord/Telegram alerts, and livestream validation for each connector. A new platform needs documented event access, stable source IDs, replay fixtures and a broadcaster-owned smoke test before its status can move from file import to live-verified. The integration tests can run without creator credentials. Confirm actual event receipt on a broadcaster account before relying on a connector for a show.
+CI runs the Python suite, native JavaScript handler tests, a replay check and Docker smoke tests. Platform receipts in the tests come from fixtures. Broadcaster acceptance requires a live account, the relevant scope or webhook registration, and a test event from the intended room. The source guide identifies where a provider still needs to grant access. Follow-back requests support local review and manual completion. The automation focuses on a creator's own connected rooms; the directory command returns rooms for a human to review.
+
+The [feature coverage table](docs/feature-status.md) maps the original brief to each implementation and identifies the remaining platform-specific dependencies.

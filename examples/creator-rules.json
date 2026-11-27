@@ -4,8 +4,45 @@
   "gift": "Thank you for supporting the stream, {user}!",
   "follow": "Thanks for the follow, {user}!",
   "keywords": [
-    {"terms": ["schedule", "next stream"], "reply": "Our workshop streams on Fridays at 6 pm Denver time."},
-    {"terms": ["socials", "community link"], "reply": "Our community links are in the channel's About panel."},
-    {"terms": ["hello", "hi", "hey"], "reply": "Hey {user}, welcome to chat!"}
+    {
+      "terms": [
+        "schedule",
+        "next stream"
+      ],
+      "reply": "Our workshop streams on Fridays at 6 pm Denver time."
+    },
+    {
+      "terms": [
+        "socials",
+        "community link"
+      ],
+      "reply": "Our community links are in the channel's About panel."
+    },
+    {
+      "terms": [
+        "hello",
+        "hi",
+        "hey"
+      ],
+      "reply": "Hey {user}, welcome to chat!"
+    }
+  ],
+  "persona": "You host a relaxed art workshop. Keep answers brief and speak plainly.",
+  "gift_tiers": [
+    {
+      "platform": "chaturbate",
+      "unit": "tokens",
+      "minimum": 100,
+      "reply": [
+        "Thanks for the generous tip, {user}!",
+        "I appreciate your support, {user}!"
+      ]
+    },
+    {
+      "platform": "twitch",
+      "unit": "bits",
+      "minimum": 1000,
+      "reply": "Thank you for the big cheer, {user}!"
+    }
   ]
 }

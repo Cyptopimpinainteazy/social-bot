@@ -1,0 +1,12 @@
+services:
+  listeners:
+    build: .
+    init: true
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./fleet.json:/app/fleet.json:ro
+      - creator_data:/app/data
+    command: ["--db", "/app/data/socialbot.sqlite3", "fleet", "--config", "/app/fleet.json"]
+volumes:
+  creator_data:

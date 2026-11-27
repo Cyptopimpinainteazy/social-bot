@@ -231,15 +231,18 @@ def listen_kick(channel, rules, port=8091):
             seen.popitem(last=False)
         seen[digest] = now + 300
 
+        active_rules = rules() if callable(rules) else rules
         kind = event["kind"]
         counts[kind] += 1
         if kind == "chat":
-            template = next((reply for regex, reply in rules["keywords"] if regex.search(event["text"])), None)
+            template = next((reply for regex, reply in active_rules["keywords"] if regex.search(event["text"])), None)
         else:
-            template = rules[kind]
+            template = active_rules[kind]
         line = f"Kick {kind} · {counts[kind]} this session"
         if template:
             # Only operator-written text enters the terminal, even if a viewer types a command or handle.
+            from .engine import select_template
+            template = select_template(template, event["id"])
             suggestion = template.replace("@{user}", "{user}").format(user="friend")
             line += f"  |  Suggested reply: {suggestion}"
         if sys.stdout.isatty():

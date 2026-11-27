@@ -6,7 +6,9 @@ from contextlib import closing
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
+
+from . import ops
 
 
 STYLES = """
@@ -55,7 +57,7 @@ td,.feed li{overflow-wrap:anywhere}
 .approved,.sent{background:#ddf0e1;color:#215737}
 .body{white-space:pre-wrap;margin:6px 0}
 .empty{padding:18px 20px;color:#52675c}
-footer{padding:18px 0}
+footer{padding:18px 0}.control-nav{display:flex;gap:18px;margin-top:14px}.control-nav a{color:#23503f}
 @media(max-width:750px){.split{grid-template-columns:1fr;gap:0}.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.card{padding:12px}.bar{gap:8px}.title{margin-top:24px}th,td{padding:8px 10px}}
 """
 
@@ -122,7 +124,10 @@ def _snapshot(db_path):
                    substr(text, 1, 300) AS text, received_at FROM events
              ORDER BY received_at DESC, platform, channel, event_id DESC LIMIT 12
         """).fetchall()
-    return totals, platforms, channels, drafts, events
+        regulars = db.execute("""SELECT platform,channel,viewer,joins,chats,gifts FROM viewers
+                   WHERE joins>1 OR gifts>0 OR chats>1 ORDER BY joins DESC,gifts DESC,chats DESC,
+                   platform,channel,viewer LIMIT 12""").fetchall()
+    return totals, platforms, channels, drafts, events, regulars
 
 
 def _table(title, anchor, headers, rows, numeric, caption, empty):
@@ -172,9 +177,9 @@ def _event_line(row):
             '</div></li>')
 
 
-def render_dashboard(db_path):
+def render_dashboard(db_path, controls=None, extra_dbs=()):
     """Return a consistent HTML snapshot. Opening a missing database raises IOError/SQLite error."""
-    totals, platforms, channels, drafts, events = _snapshot(db_path)
+    totals, platforms, channels, drafts, events, regulars = _snapshot(db_path)
     cards = "".join(
         f'<div class="card"><p class="label">{label}</p><p class="metric">{totals[key]:,}</p></div>'
         for label, key in (("Events received", "events"), ("Gift events", "gifts"),
@@ -192,18 +197,44 @@ def render_dashboard(db_path):
     )
     draft_feed = _feed("Recent drafts", "drafts", [_draft_line(row) for row in drafts], "No reply drafts yet.")
     event_feed = _feed("Recent activity", "activity", [_event_line(row) for row in events], "No events received yet.")
+    extras = ""
+    if regulars:
+        extras += _table("Returning viewers and supporters", "regulars",
+                         ("Platform","Channel","Viewer","Entries","Chats","Gifts"),
+                         regulars, {3,4,5}, "Top 12 by entries, gifts and chats", "")
+    if extra_dbs:
+        rows = []
+        for alias, path in extra_dbs:
+            try:
+                summary = _snapshot(path)[0]
+                rows.append((alias,str(summary["events"]),str(summary["drafts"]),str(summary["pending"]),"Available"))
+            except (OSError,sqlite3.Error):
+                rows.append((alias,"—","—","—","Unavailable"))
+        extras += _table("Additional accounts", "accounts", ("Account","Events","Drafts","Pending","Database"),
+                         rows, set(), "Independent databases", "")
+    workers = ops.dashboard_status(db_path)
+    if workers:
+        rows = [(r["name"], r["platform"], r["state"], r["restarts"], _stamp(r["heartbeat_at"])) for r in workers]
+        extras += _table("Room listeners","workers",("Room","Platform","State","Restarts","Heartbeat (UTC)"),
+                         rows,{3},"Fleet status","")
+    links = []
+    if controls:
+        for key, label in (("rules","Edit reply rules"),("fleet","Edit room listeners"),("review","Review pending replies")):
+            if key in controls.files or (key=="review" and controls.review):
+                links.append(f'<a href="/control/{key}">{label}</a>')
+    control_nav = '<nav aria-label="Local controls" class="control-nav">' + " ".join(links) + '</nav>' if links else ""
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Creator dashboard | Social Bot</title>
 <style>{STYLES}</style></head><body>
 <header><div class="shell bar"><div class="brand"><span class="wave" aria-hidden="true"><i></i><i></i><i></i></span>Social Bot</div>
 <nav aria-label="Dashboard sections"><a href="#platforms">Platforms</a><a href="#channels">Channels</a><a href="#drafts">Drafts</a><a href="#activity">Activity</a></nav></div></header>
 <main class="shell"><div class="title"><h1>Creator dashboard</h1><a href="/">Refresh dashboard</a></div>
-<div class="cards">{cards}</div>{platforms_table}{channels_table}<div class="split">{draft_feed}{event_feed}</div>
+<div class="cards">{cards}</div>{control_nav}{platforms_table}{channels_table}<div class="split">{draft_feed}{event_feed}</div>{extras}
 <footer>All activity times in UTC. Viewer records count a viewer separately in each channel.</footer>
 </main></body></html>"""
 
 
-def _handler(db_path):
+def _handler(db_path, controls=None, extra_dbs=()):
     class DashboardHandler(BaseHTTPRequestHandler):
         def do_GET(self):
             self._respond()
@@ -211,26 +242,63 @@ def _handler(db_path):
         def do_HEAD(self):
             self._respond(headers_only=True)
 
-        def _respond(self, headers_only=False):
-            host = self.headers.get("Host", "").partition(":")[0].lower()
-            if host not in {"127.0.0.1", "localhost"}:
+        def _local(self):
+            host = self.headers.get("Host", "")
+            return host.lower() in {"localhost", "127.0.0.1", f"localhost:{self.server.server_port}",
+                                    f"127.0.0.1:{self.server.server_port}"}
+
+        def do_POST(self):
+            kind = self.path.removeprefix("/control/")
+            host = self.headers.get("Host","")
+            if (not self._local() or not controls or not self.path.startswith("/control/") or
+                self.headers.get("Origin", "") != "http://" + host or
+                self.headers.get_content_type() != "application/x-www-form-urlencoded"):
                 self.send_error(403)
                 return
-            if urlsplit(self.path).path != "/":
+            try:
+                length = int(self.headers.get("Content-Length","0"))
+                if self.headers.get("Transfer-Encoding") or not 0 < length <= 360000:
+                    raise ValueError("Invalid form length")
+                parts = parse_qs(self.rfile.read(length).decode(),keep_blank_values=True,max_num_fields=8)
+                if any(len(v)!=1 for v in parts.values()):
+                    raise ValueError("Duplicate form fields")
+                controls.submit(kind,{k:v[0] for k,v in parts.items()})
+            except PermissionError:
+                self.send_error(403)
+                return
+            except (KeyError,ValueError,OSError,sqlite3.Error,RecursionError) as exc:
+                self.send_error(400, explain=str(exc))
+                return
+            self.send_response(303)
+            self.send_header("Location",self.path)
+            self.end_headers()
+
+        def _respond(self, headers_only=False):
+            if not self._local():
+                self.send_error(403)
+                return
+            path = urlsplit(self.path).path
+            try:
+                if path == "/":
+                    body = render_dashboard(db_path, controls, extra_dbs)
+                elif controls and path.startswith("/control/"):
+                    body = controls.form(path.removeprefix("/control/"))
+                else:
+                    raise KeyError(path)
+                data = body.encode("utf-8")
+                code = 200
+            except KeyError:
                 self.send_error(404)
                 return
-            try:
-                data = render_dashboard(db_path).encode("utf-8")
-                code = 200
-            except (OSError, sqlite3.Error):
-                data = b"<html lang='en'><title>Dashboard unavailable</title><p>Database unavailable. Check the database path and initialize the project.</p></html>"
+            except (OSError, sqlite3.Error,ValueError):
+                data = b"<html lang='en'><title>Dashboard unavailable</title><p>Database or configuration unavailable.</p></html>"
                 code = 503
             self.send_response(code)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+            self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
             self.end_headers()
             if not headers_only:
                 self.wfile.write(data)
@@ -238,9 +306,9 @@ def _handler(db_path):
     return DashboardHandler
 
 
-def serve_dashboard(db_path, port=8080):
+def serve_dashboard(db_path, port=8080, *, controls=None, extra_dbs=()):
     """Serve a local dashboard until interrupted."""
-    with ThreadingHTTPServer(("127.0.0.1", port), _handler(db_path)) as server:
+    with ThreadingHTTPServer(("127.0.0.1", port), _handler(db_path,controls,extra_dbs)) as server:
         print(f"Creator dashboard at http://127.0.0.1:{server.server_port}/", flush=True)
         try:
             server.serve_forever()

@@ -97,11 +97,15 @@ def parse_event(line, channel, bot_login):
         return None
     if not LOGIN.fullmatch(user) or user in (bot_login, channel, "jtv", "twitchnotify") or not text.strip():
         return None
-    return {"id": tags["id"], "platform": "twitch", "channel": channel, "kind": kind,
+    event = {"id": tags["id"], "platform": "twitch", "channel": channel, "kind": kind,
             "user": user, "user_id": native_id, "text": text}
+    if command == "PRIVMSG" and kind == "gift" and len(bits) <= 15:
+        event.update(gift_amount=int(bits), gift_unit="bits")
+    return event
 
 
 def _session(channel, bot_login, token):
+    from .ops import pulse
     context = ssl.create_default_context()
     next_validation = time.monotonic() + 3300
     with socket.create_connection((IRC_HOST, 6697), timeout=15) as raw:
@@ -114,6 +118,8 @@ def _session(channel, bot_login, token):
                     _validate(token, "chat:read", bot_login)
                     next_validation = time.monotonic() + 3300
                 data = lines.readline(MAX_LINE + 1)
+                if data:
+                    pulse()
                 if not data:
                     return
                 if len(data) > MAX_LINE or not data.endswith(b"\n"):
@@ -165,9 +171,16 @@ def iter_twitch_events(channel: str):
 
 def send_twitch_reply(channel: str, parent_id: str, text: str) -> str:
     """Send exactly one reply as the owner of this channel; return Twitch's receipt ID."""
-    channel = _login(channel)
     if not MESSAGE_ID.fullmatch(parent_id):
         raise TwitchError("A Twitch parent message UUID is required.")
+    return _send_chat(channel, text, parent_id)
+
+def send_twitch_announcement(channel, text):
+    """Publish one creator-approved room announcement through Helix."""
+    return _send_chat(channel, text)
+
+def _send_chat(channel, text, parent_id=None):
+    channel = _login(channel)
     if not text.strip() or len(text) > 500 or any(ord(ch) < 32 for ch in text):
         raise TwitchError("A Twitch reply must be one line with 1–500 characters.")
     try:
@@ -176,7 +189,9 @@ def send_twitch_reply(channel: str, parent_id: str, text: str) -> str:
     except TwitchError as exc:
         raise TwitchPreflightError(str(exc)) from None
     body = {"broadcaster_id": owner["user_id"], "sender_id": owner["user_id"],
-            "reply_parent_message_id": parent_id, "message": text}
+            "message": text}
+    if parent_id is not None:
+        body["reply_parent_message_id"] = parent_id
     request = Request("https://api.twitch.tv/helix/chat/messages", data=json.dumps(body).encode(),
                       headers={"Client-Id": owner["client_id"], "Content-Type": "application/json"})
     request.add_unredirected_header("Authorization", f"Bearer {token}")

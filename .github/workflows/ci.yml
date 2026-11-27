@@ -14,7 +14,14 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -r requirements-kick.txt
+      - run: node --version
+      - run: python -m compileall -q socialbot tests
+      - run: sh -n deploy.sh && ./deploy.sh check
       - run: python -m unittest discover -s tests -v
+      - name: Exercise BIGO chat import
+        run: |
+          python -m socialbot --db /tmp/bigo.db creator-import bigo examples/bigo-chat-history.json --channel studio
+          python -m socialbot --db /tmp/bigo.db drafts --status pending | grep -F '"reason": "keyword"'
       - run: python -m socialbot --db /tmp/demo.db demo
       - name: Verify replay leaves counts unchanged
         run: |
@@ -25,3 +32,4 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -t social-bot .
       - run: docker run --rm social-bot demo
+      - run: docker run --rm -v "$PWD/examples/fleet.json:/app/fleet.json:ro" social-bot fleet --config /app/fleet.json --check

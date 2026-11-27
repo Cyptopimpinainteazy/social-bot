@@ -32,7 +32,8 @@ class YouTubeTests(unittest.TestCase):
         self.assertEqual([e["kind"] for e in result], ["chat", "gift", "gift"])
         self.assertEqual([e["id"] for e in result], ["chat", "paid", "sticker"])
         self.assertEqual(result[0], {"platform": "youtube", "channel": "studio", "id": "chat",
-                                    "kind": "chat", "user": "River", "user_id": "UCriver", "text": "hello"})
+                                    "kind": "chat", "user": "River", "user_id": "UCriver", "text": "hello",
+                                    "live_chat_id": "live-broadcast"})
         self.assertEqual(result[1]["text"], "Super Chat ($2.00)")
         self.assertEqual(result[2]["text"], "Super Sticker")
         self.assertEqual(get.call_args_list, [call("live-broadcast", "abc-key", None),

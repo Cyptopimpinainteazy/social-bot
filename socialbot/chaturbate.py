@@ -95,8 +95,11 @@ def _normalize(event: object, channel: str) -> dict | None:
         if type(tokens) is not int or tokens < 1:
             return None
         text = f"{tokens} token" if tokens == 1 else f"{tokens} tokens"
-    return {"platform": "chaturbate", "channel": channel, "id": identifier,
+    result = {"platform": "chaturbate", "channel": channel, "id": identifier,
             "kind": kind, "user": user, "text": text}
+    if kind == "gift":
+        result.update(gift_amount=tokens, gift_unit="tokens")
+    return result
 
 
 def iter_events(channel: str, token: str, *, once: bool = False) -> Iterator[dict]:
@@ -105,6 +108,7 @@ def iter_events(channel: str, token: str, *, once: bool = False) -> Iterator[dic
         raise FeedError("Provide a valid broadcaster username.")
     if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9._~-]+", token) or token in (".", ".."):
         raise FeedError("Provide a valid Events API token.")
+    from .ops import pulse
     channel = channel.lower()
     path = f"/events/{channel}/{token}/"
     target = path + "?timeout=10"
@@ -112,6 +116,7 @@ def iter_events(channel: str, token: str, *, once: bool = False) -> Iterator[dic
     while True:
         try:
             page = _get_page(target)
+            pulse()
         except _TemporaryError:
             if failures == 3:
                 raise

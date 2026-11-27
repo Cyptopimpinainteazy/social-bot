@@ -8,3 +8,8 @@ data/
 *.sqlite*
 *.db
 *.db-*
+*.lock
+*.db.fleet/
+*.sqlite3.fleet/
+/fleet.json
+/my-rules.json

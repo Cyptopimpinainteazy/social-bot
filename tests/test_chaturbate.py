@@ -29,7 +29,8 @@ class EventsTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in result], [f"10-{n}" for n in range(5)])
         self.assertEqual([r["kind"] for r in result], ["chat", "join", "follow", "gift", "gift"])
         self.assertEqual(result[-1], {"id": "10-4", "platform": "chaturbate", "channel": ROOM,
-                                      "kind": "gift", "user": "River", "text": "8 tokens"})
+                                      "kind": "gift", "user": "River", "text": "8 tokens",
+                                      "gift_amount": 8, "gift_unit": "tokens"})
         self.assertEqual(result[0]["text"], "hello")
         self.assertNotIn("tip note", repr(result))
 

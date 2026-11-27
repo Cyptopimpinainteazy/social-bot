@@ -73,7 +73,7 @@ def _normalize(item: object, channel: str, live_chat_id: str) -> dict | None:
     else:
         return None
     return {"id": item["id"], "platform": "youtube", "channel": channel, "kind": kind,
-            "user": user, "user_id": user_id, "text": text}
+            "user": user, "user_id": user_id, "text": text, "live_chat_id": live_chat_id}
 
 
 def iter_events(channel: str, live_chat_id: str, api_key: str, *, once: bool = False) -> Iterator[dict]:
@@ -82,10 +82,12 @@ def iter_events(channel: str, live_chat_id: str, api_key: str, *, once: bool = F
         raise FeedError("Provide a channel label and an active YouTube live chat ID.")
     if not isinstance(api_key, str) or not api_key or not all(33 <= ord(c) < 127 for c in api_key):
         raise FeedError("Provide a valid YouTube Data API key.")
+    from .ops import pulse
     cursor = None
     history_ids = set()
     while True:
         page = _get_page(live_chat_id, api_key, cursor)
+        pulse()
         if cursor is None:
             history_ids = {i["id"] for i in page["items"] if isinstance(i, dict) and isinstance(i.get("id"), str)}
         else:

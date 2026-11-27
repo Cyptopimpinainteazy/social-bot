@@ -1,0 +1,9 @@
+{
+  "watchdog_seconds": 600,
+  "rooms": [
+    {"name": "studio", "platform": "twitch", "channel": "replace_with_your_login", "auto_reply": false},
+    {"name": "stage", "platform": "youtube", "channel": "your_channel_label", "live_chat_id": "REPLACE_WITH_ACTIVE_LIVE_CHAT_ID"},
+    {"name": "lounge", "platform": "chaturbate", "channel": "replace_with_your_room", "env": {"CHATURBATE_TOKEN": "LOUNGE_EVENTS_TOKEN"}}
+  ],
+  "alerts": {"events": [], "destinations": []}
+}
