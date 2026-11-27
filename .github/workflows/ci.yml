@@ -16,7 +16,9 @@ jobs:
       - run: python -m pip install -r requirements-kick.txt
       - run: python -m unittest discover -s tests -v
       - run: python -m socialbot --db /tmp/demo.db demo
-      - run: python -m socialbot --db /tmp/demo.db demo | grep -F 'Events added: 0 | duplicates: 9 | drafts created: 0'
+      - name: Verify replay leaves counts unchanged
+        run: |
+          python -m socialbot --db /tmp/demo.db demo | grep -F 'Events added: 0 | duplicates: 9 | drafts created: 0'
   container:
     runs-on: ubuntu-latest
     steps:
