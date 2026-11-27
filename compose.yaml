@@ -1,0 +1,9 @@
+services:
+  demo:
+    build: .
+    network_mode: host
+    volumes:
+      - creator_data:/app/data
+    command: ["demo", "--dashboard"]
+volumes:
+  creator_data:

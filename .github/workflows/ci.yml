@@ -1,0 +1,25 @@
+name: Social Bot CI
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -r requirements-kick.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python -m socialbot --db /tmp/demo.db demo
+      - run: python -m socialbot --db /tmp/demo.db demo | grep -F 'Events added: 0 | duplicates: 9 | drafts created: 0'
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t social-bot .
+      - run: docker run --rm social-bot demo

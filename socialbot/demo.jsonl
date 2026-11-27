@@ -1,0 +1,9 @@
+{"platform":"bigo","channel":"studio","id":"b1","kind":"join","user":"River"}
+{"platform":"bigo","channel":"studio","id":"b2","kind":"chat","user":"River","text":"What's the schedule?"}
+{"platform":"bigo","channel":"studio","id":"b3","kind":"gift","user":"Juniper","text":"Rose"}
+{"platform":"bigo","channel":"studio","id":"b4","kind":"join","user":"River"}
+{"platform":"twitch","channel":"studio","id":"t1","kind":"chat","user":"North","text":"Where are your socials?"}
+{"platform":"twitch","channel":"studio","id":"t2","kind":"chat","user":"Echo","text":"What inspired the artwork?"}
+{"platform":"chaturbate","channel":"atelier","id":"c1","kind":"follow","user":"Sky"}
+{"platform":"chaturbate","channel":"atelier","id":"c2","kind":"gift","user":"Sky","text":"10 tokens"}
+{"platform":"youtube","channel":"workshop","id":"y1","kind":"chat","user":"Finch","text":"Hello from Denver"}

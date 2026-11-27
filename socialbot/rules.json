@@ -1,0 +1,11 @@
+{
+  "first_join": "Welcome, {user}! Glad you could join the stream.",
+  "return_join": "Welcome back, {user}!",
+  "gift": "Thank you for supporting the stream, {user}!",
+  "follow": "Thanks for the follow, {user}!",
+  "keywords": [
+    {"terms": ["schedule", "next stream"], "reply": "You'll find upcoming stream times in the channel bio."},
+    {"terms": ["socials", "community link"], "reply": "The creator's official links are in the channel bio."},
+    {"terms": ["hello", "hi", "hey"], "reply": "Hey {user}, welcome to chat!"}
+  ]
+}
